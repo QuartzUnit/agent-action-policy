@@ -1,0 +1,57 @@
+policies:
+  - name: no-destructive-git
+    match:
+      tool: "bash"
+      args_pattern: "git\\s+(push\\s+--force|reset\\s+--hard|clean\\s+-[fd]|branch\\s+-D)"
+    action: deny
+    reason: "Destructive git operations require human approval"
+    priority: 10
+
+  - name: no-force-push-main
+    match:
+      tool: "bash"
+      args_pattern: "git\\s+push\\s+--force.*\\b(main|master)\\b"
+    action: deny
+    reason: "Force push to main/master is not allowed"
+    priority: 5
+
+  - name: no-rm-rf
+    match:
+      tool: "bash"
+      args_pattern: "rm\\s+-[rf]{2,}"
+    action: escalate
+    reason: "Recursive file deletion needs confirmation"
+    priority: 10
+
+  - name: no-system-file-write
+    match:
+      tool: "~(file_write|write_file|edit)"
+      path_patterns:
+        - "/etc/*"
+        - "/usr/*"
+        - "/boot/*"
+        - "/sys/*"
+    action: deny
+    reason: "System file modification is not allowed"
+    priority: 10
+
+  - name: no-credential-access
+    match:
+      tool: "~(file_read|read_file|read|cat)"
+      path_patterns:
+        - "~\\.env$"
+        - "~credentials"
+        - "~\\.ssh/"
+        - "~\\.aws/"
+        - "~\\.gnupg/"
+    action: escalate
+    reason: "Credential file access needs confirmation"
+    priority: 20
+
+  - name: no-skip-hooks
+    match:
+      tool: "bash"
+      args_pattern: "--no-verify|--no-gpg-sign"
+    action: deny
+    reason: "Skipping git hooks or GPG signing is not allowed"
+    priority: 10

@@ -1,0 +1,9 @@
+policies:
+  - name: allow-read-only
+    match:
+      tool: "~(read|search|grep|glob|list|ls|cat|head|tail|find)"
+    action: approve
+    reason: "Read-only operations are allowed"
+    priority: 10
+
+  # Everything else is denied by default when using strict with default_action=DENY

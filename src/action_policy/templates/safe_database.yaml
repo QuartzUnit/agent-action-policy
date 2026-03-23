@@ -1,0 +1,24 @@
+policies:
+  - name: block-ddl
+    match:
+      tool: "~(sql|query|database|db)"
+      args_pattern: "(?i)(DROP|TRUNCATE|ALTER|CREATE)\\s+(TABLE|DATABASE|INDEX|SCHEMA)"
+    action: deny
+    reason: "DDL operations (DROP, TRUNCATE, ALTER, CREATE) are not allowed"
+    priority: 10
+
+  - name: escalate-delete
+    match:
+      tool: "~(sql|query|database|db)"
+      args_pattern: "(?i)DELETE\\s+FROM"
+    action: escalate
+    reason: "DELETE operations need confirmation"
+    priority: 20
+
+  - name: escalate-update-no-where
+    match:
+      tool: "~(sql|query|database|db)"
+      args_pattern: "(?i)UPDATE\\s+\\w+\\s+SET(?!.*WHERE)"
+    action: escalate
+    reason: "UPDATE without WHERE clause needs confirmation"
+    priority: 20

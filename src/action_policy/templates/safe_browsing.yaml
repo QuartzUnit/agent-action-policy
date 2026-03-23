@@ -1,0 +1,23 @@
+policies:
+  - name: block-internal-urls
+    match:
+      tool: "~(http_request|web_fetch|fetch|browse)"
+      args_pattern: "(127\\.0\\.0\\.1|localhost|0\\.0\\.0\\.0|\\[::1\\]|169\\.254)"
+    action: deny
+    reason: "Access to internal/metadata URLs is not allowed"
+    priority: 10
+
+  - name: block-file-protocol
+    match:
+      tool: "~(http_request|web_fetch|fetch|browse)"
+      args_pattern: "file://"
+    action: deny
+    reason: "file:// protocol access is not allowed"
+    priority: 10
+
+  - name: escalate-download
+    match:
+      tool: "~(download|wget|curl)"
+    action: escalate
+    reason: "File downloads need confirmation"
+    priority: 50
