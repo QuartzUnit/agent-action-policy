@@ -1,5 +1,7 @@
 # agent-action-policy
 
+> [한국어 문서](README.ko.md)
+
 Declarative action policies for AI agents — approve, deny, or escalate any tool call before execution.
 
 ## Install
