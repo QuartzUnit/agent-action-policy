@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-action-policy"
-version = "0.1.0"
+version = "0.1.1"
 description = "Declarative action policies for AI agents — approve, deny, or escalate any tool call before execution"
 readme = "README.md"
 license = "MIT"
