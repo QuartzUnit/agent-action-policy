@@ -119,6 +119,10 @@ def execute_tool(tool: str, args: dict = None):
 | Args regex | any regex | `"git\\s+push\\s+--force"` |
 | Path glob | glob or `~regex` | `"/etc/*"`, `"~\\.env$"` |
 
+## Used in
+
+- [watchdeck](https://github.com/QuartzUnit/watchdeck) — Web page monitoring with visual diffs and safety guards
+
 ## License
 
 MIT
