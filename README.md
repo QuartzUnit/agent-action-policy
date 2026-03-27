@@ -41,6 +41,18 @@ print(decision.reason)  # "Force push requires human approval"
 
 Sandboxing and policies are complementary. Use both.
 
+```mermaid
+flowchart TD
+    A["🤖 Agent Action\n(tool + args)"] --> B["Policy Engine"]
+    B --> C["Match Rules\ntool name · args pattern"]
+    C --> D{"Decision?"}
+    D -->|"allow"| E["✅ Execute"]
+    D -->|"deny"| F["🚫 Block"]
+    D -->|"escalate"| G["👤 Human\nApproval"]
+    G -->|"approved"| E
+    G -->|"rejected"| F
+```
+
 ## Policy Definition (YAML)
 
 ```yaml
