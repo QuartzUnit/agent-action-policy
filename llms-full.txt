@@ -1,0 +1,534 @@
+# agent-action-policy
+
+> Declarative action policies for AI agents -- approve, deny, or escalate any tool call before execution
+
+## Purpose
+
+Provides a declarative policy engine that evaluates agent tool calls against configurable rules before execution. Policies can be defined in YAML or Python dicts with support for glob and regex pattern matching. Ships with 4 built-in templates. Zero required dependencies (PyYAML optional for YAML loading).
+
+## Capabilities
+
+- **Policy evaluation**: Match tool calls by tool name, argument content, and file paths
+- **Three actions**: APPROVE, DENY, or ESCALATE any tool call
+- **Pattern matching**: Exact match, glob (`file_*`), and regex (`~(bash|shell)`) for tool names; regex for args; glob/regex for file paths
+- **Built-in templates**: `safe_coding`, `safe_browsing`, `safe_database`, `strict`
+- **Priority ordering**: Lower priority number wins when multiple policies match
+- **Decorator guard**: `@engine.guard` decorator raises `PolicyDenied` / `PolicyEscalated` on blocked calls
+- **Open or closed default**: Configurable default action (APPROVE or DENY) when no policy matches
+
+## Installation
+
+```
+pip install agent-action-policy
+pip install agent-action-policy[yaml]  # for YAML file loading
+```
+
+## Quick Use
+
+```python
+from action_policy import PolicyEngine, Action
+
+engine = PolicyEngine.from_template("safe_coding")
+decision = engine.evaluate(tool="bash", args={"command": "rm -rf /"})
+print(decision.denied)   # True
+print(decision.reason)   # explanation from the policy rule
+```
+
+## Architecture
+
+PolicyEngine holds a priority-sorted list of PolicyRule instances. On `evaluate()`, it iterates rules in priority order and returns the first match. Each rule checks: tool pattern -> args pattern -> path patterns. If no rule matches, the engine returns its default action (APPROVE or DENY).
+
+```
+                    PolicyEngine.evaluate(tool, args)
+                              │
+                    for rule in sorted(policies, key=priority):
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              match_tool()        (no match → next rule)
+                    │
+              match_args()        (no pattern → skip)
+                    │
+              match_path()        (no pattern → skip)
+                    │
+                    ▼
+              return rule.to_decision()
+                              │
+              (no rule matched)
+                    ▼
+              return default_action
+```
+
+## API Reference
+
+### PolicyEngine
+
+```python
+from action_policy import PolicyEngine
+```
+
+Core policy engine.
+
+**Constructor:**
+```python
+PolicyEngine(
+    policies: list[PolicyRule] | None = None,   # policy rules, auto-sorted by priority
+    default_action: Action = Action.APPROVE,     # action when no policy matches
+    default_reason: str = ""                     # reason for default action
+)
+```
+
+**Parameters:**
+- `policies` — List of PolicyRule instances. Automatically sorted by priority (lower number = higher priority). Default: empty list.
+- `default_action` — What to return when no policy matches. `Action.APPROVE` for open-by-default (permissive), `Action.DENY` for fail-closed (restrictive). Default: APPROVE.
+- `default_reason` — Custom reason string for default decisions. Auto-generated if empty.
+
+**Class Methods:**
+
+`from_yaml(path: str | Path, **kwargs) -> PolicyEngine`
+- Load policies from a YAML file. Requires `pip install agent-action-policy[yaml]`.
+- `path` — Path to YAML file containing a `policies` list.
+- `**kwargs` — Forwarded to `PolicyEngine()` constructor (e.g., `default_action`).
+
+`from_dict(data: dict[str, Any], **kwargs) -> PolicyEngine`
+- Load policies from a Python dict (same structure as parsed YAML).
+- `data` — Dict with a `policies` key containing a list of policy dicts.
+- `**kwargs` — Forwarded to `PolicyEngine()` constructor.
+
+`from_template(template_name: str, **kwargs) -> PolicyEngine`
+- Load a built-in policy template.
+- `template_name` — One of: `"safe_coding"`, `"safe_browsing"`, `"safe_database"`, `"strict"`.
+- `**kwargs` — Forwarded to `PolicyEngine()` constructor.
+- Raises `ValueError` if template name is unknown.
+
+**Instance Methods:**
+
+`evaluate(tool: str, args: dict[str, Any] | str | None = None) -> Decision`
+- Evaluate a tool call against all policies. First matching policy (by priority) wins.
+- `tool` — Tool name string (e.g., "bash", "read_file", "sql_query").
+- `args` — Tool arguments. Dict, str, or None.
+- Returns: Decision with action, policy_name, and reason.
+
+`guard(func: Callable) -> Callable`
+- Decorator that checks policy before executing the wrapped function.
+- The decorated function must accept `tool` as its first arg and `args` as keyword arg.
+- Raises `PolicyDenied` on DENY, `PolicyEscalated` on ESCALATE.
+- On APPROVE, calls and returns the original function.
+
+`add_policy(policy: PolicyRule) -> None`
+- Add a single policy rule and re-sort the internal list by priority.
+
+**Property:**
+- `policies -> list[PolicyRule]` — Copy of the current policy list (sorted by priority).
+
+### PolicyRule
+
+```python
+from action_policy import PolicyRule
+```
+
+Frozen dataclass defining a single policy rule.
+
+**Constructor:**
+```python
+PolicyRule(
+    name: str,                                # human-readable policy name
+    action: Action,                           # APPROVE, DENY, or ESCALATE
+    reason: str = "",                         # explanation for this rule
+    tool_pattern: str = "*",                  # pattern to match tool names
+    args_pattern: str | None = None,          # regex to match stringified args
+    path_patterns: tuple[str, ...] = (),      # glob/regex patterns for file paths
+    priority: int = 100                       # lower = higher priority
+)
+```
+
+**Parameters:**
+- `name` — Unique identifier for this rule (appears in Decision.policy_name).
+- `action` — What action to take when matched.
+- `reason` — Human-readable explanation (appears in Decision.reason).
+- `tool_pattern` — Pattern to match tool names. Supports exact match ("bash"), glob ("file_*"), or regex with ~ prefix ("~(bash|shell|exec)"). Default "*" matches all tools.
+- `args_pattern` — Regex pattern matched against stringified args. None = skip args matching. Args are stringified as sorted "key=value" pairs.
+- `path_patterns` — Tuple of patterns to match file paths extracted from args. Supports glob ("/etc/*") and regex with ~ prefix ("~\\.env$"). Paths are extracted from args dict keys: path, file_path, filename, file, filepath.
+- `priority` — Lower number = evaluated first. When multiple rules could match, the lowest priority number wins.
+
+**Methods:**
+- `matches(tool: str, args: dict | str | None = None) -> bool` — Check if this rule matches the given tool call. All specified patterns must match (AND logic).
+- `to_decision() -> Decision` — Create a Decision from this rule's action, name, and reason.
+
+### Action
+
+```python
+from action_policy import Action
+```
+
+Enum with three values:
+- `Action.APPROVE` — Allow the tool call to proceed.
+- `Action.DENY` — Block the tool call.
+- `Action.ESCALATE` — Require human confirmation before proceeding.
+
+### Decision
+
+```python
+from action_policy import Decision
+```
+
+Frozen dataclass returned by `PolicyEngine.evaluate()`.
+
+**Fields:**
+- `action: Action` — The policy decision.
+- `policy_name: str` — Name of the matching policy rule, or empty for default decisions.
+- `reason: str` — Human-readable explanation.
+
+**Properties:**
+- `approved -> bool` — True when action is APPROVE.
+- `denied -> bool` — True when action is DENY.
+- `escalated -> bool` — True when action is ESCALATE.
+
+### PolicyDenied
+
+```python
+from action_policy import PolicyDenied
+```
+
+Exception raised by `@engine.guard` when a policy denies an action.
+
+**Attributes:**
+- `decision: Decision` — The denial decision with policy_name and reason.
+- Message format: `"Policy '{name}' denied: {reason}"`
+
+### PolicyEscalated
+
+```python
+from action_policy import PolicyEscalated
+```
+
+Exception raised by `@engine.guard` when a policy requires escalation.
+
+**Attributes:**
+- `decision: Decision` — The escalation decision with policy_name and reason.
+- Message format: `"Policy '{name}' requires escalation: {reason}"`
+
+### Loader Functions
+
+```python
+from action_policy.loader import load_policies_from_yaml, load_policies_from_dict
+```
+
+`load_policies_from_yaml(path: str | Path) -> list[PolicyRule]`
+- Parse a YAML file and return sorted PolicyRule list. Requires PyYAML.
+
+`load_policies_from_dict(data: dict[str, Any]) -> list[PolicyRule]`
+- Parse a dict with `policies` key and return sorted PolicyRule list.
+
+```python
+from action_policy.policy import policy_from_dict
+```
+
+`policy_from_dict(data: dict[str, Any]) -> PolicyRule`
+- Create a single PolicyRule from a dict. Used internally by loaders.
+- Dict format: `{"name": str, "action": str, "reason": str, "match": {"tool": str, "args_pattern": str, "path_patterns": list[str]}, "priority": int}`
+
+## Pattern Matching Reference
+
+### Tool patterns (`tool_pattern`)
+- **Exact**: `"bash"` matches only `"bash"`
+- **Glob**: `"file_*"` matches `"file_read"`, `"file_write"`, etc. Supports `*`, `?`, `[abc]`
+- **Regex**: `"~(bash|shell|exec)"` matches any of those (prefix with `~`)
+
+### Args patterns (`args_pattern`)
+- Always regex, matched against stringified args
+- Dict args are stringified as sorted `"key=value"` pairs joined by spaces
+- Example: `"git\\s+push\\s+--force"` matches `{"command": "git push --force origin main"}`
+
+### Path patterns (`path_patterns`)
+- **Glob**: `"/etc/*"`, `"~/.ssh/*"` — standard glob matching
+- **Regex**: `"~\\.env$"` — prefix with `~` for regex
+- Paths are extracted from args dict keys: `path`, `file_path`, `filename`, `file`, `filepath`
+- String args are treated as the path itself
+
+### Regex caching
+All regex patterns are compiled and cached via `@lru_cache(maxsize=256)`.
+
+## Built-in Templates
+
+### safe_coding
+
+Protects against destructive git operations, recursive deletion, system file writes, credential access, and hook bypassing.
+
+```yaml
+policies:
+  - name: no-destructive-git
+    match:
+      tool: "bash"
+      args_pattern: "git\\s+(push\\s+--force|reset\\s+--hard|clean\\s+-[fd]|branch\\s+-D)"
+    action: deny
+    reason: "Destructive git operations require human approval"
+    priority: 10
+
+  - name: no-force-push-main
+    match:
+      tool: "bash"
+      args_pattern: "git\\s+push\\s+--force.*\\b(main|master)\\b"
+    action: deny
+    reason: "Force push to main/master is not allowed"
+    priority: 5
+
+  - name: no-rm-rf
+    match:
+      tool: "bash"
+      args_pattern: "rm\\s+-[rf]{2,}"
+    action: escalate
+    reason: "Recursive file deletion needs confirmation"
+    priority: 10
+
+  - name: no-system-file-write
+    match:
+      tool: "~(file_write|write_file|edit)"
+      path_patterns:
+        - "/etc/*"
+        - "/usr/*"
+        - "/boot/*"
+        - "/sys/*"
+    action: deny
+    reason: "System file modification is not allowed"
+    priority: 10
+
+  - name: no-credential-access
+    match:
+      tool: "~(file_read|read_file|read|cat)"
+      path_patterns:
+        - "~\\.env$"
+        - "~credentials"
+        - "~\\.ssh/"
+        - "~\\.aws/"
+        - "~\\.gnupg/"
+    action: escalate
+    reason: "Credential file access needs confirmation"
+    priority: 20
+
+  - name: no-skip-hooks
+    match:
+      tool: "bash"
+      args_pattern: "--no-verify|--no-gpg-sign"
+    action: deny
+    reason: "Skipping git hooks or GPG signing is not allowed"
+    priority: 10
+```
+
+### safe_browsing
+
+Blocks internal/metadata URL access, file:// protocol, and escalates downloads.
+
+```yaml
+policies:
+  - name: block-internal-urls
+    match:
+      tool: "~(http_request|web_fetch|fetch|browse)"
+      args_pattern: "(127\\.0\\.0\\.1|localhost|0\\.0\\.0\\.0|\\[::1\\]|169\\.254)"
+    action: deny
+    reason: "Access to internal/metadata URLs is not allowed"
+    priority: 10
+
+  - name: block-file-protocol
+    match:
+      tool: "~(http_request|web_fetch|fetch|browse)"
+      args_pattern: "file://"
+    action: deny
+    reason: "file:// protocol access is not allowed"
+    priority: 10
+
+  - name: escalate-download
+    match:
+      tool: "~(download|wget|curl)"
+    action: escalate
+    reason: "File downloads need confirmation"
+    priority: 50
+```
+
+### safe_database
+
+Blocks DDL operations, escalates DELETE and UPDATE-without-WHERE.
+
+```yaml
+policies:
+  - name: block-ddl
+    match:
+      tool: "~(sql|query|database|db)"
+      args_pattern: "(?i)(DROP|TRUNCATE|ALTER|CREATE)\\s+(TABLE|DATABASE|INDEX|SCHEMA)"
+    action: deny
+    reason: "DDL operations (DROP, TRUNCATE, ALTER, CREATE) are not allowed"
+    priority: 10
+
+  - name: escalate-delete
+    match:
+      tool: "~(sql|query|database|db)"
+      args_pattern: "(?i)DELETE\\s+FROM"
+    action: escalate
+    reason: "DELETE operations need confirmation"
+    priority: 20
+
+  - name: escalate-update-no-where
+    match:
+      tool: "~(sql|query|database|db)"
+      args_pattern: "(?i)UPDATE\\s+\\w+\\s+SET(?!.*WHERE)"
+    action: escalate
+    reason: "UPDATE without WHERE clause needs confirmation"
+    priority: 20
+```
+
+### strict
+
+Whitelist mode — only read-only operations are approved. Pair with `default_action=Action.DENY`.
+
+```yaml
+policies:
+  - name: allow-read-only
+    match:
+      tool: "~(read|search|grep|glob|list|ls|cat|head|tail|find)"
+    action: approve
+    reason: "Read-only operations are allowed"
+    priority: 10
+```
+
+Usage: `PolicyEngine.from_template("strict", default_action=Action.DENY)`
+
+## Examples
+
+### Load from YAML file
+
+```python
+from action_policy import PolicyEngine
+
+engine = PolicyEngine.from_yaml("my_policies.yaml")
+decision = engine.evaluate("bash", {"command": "git push --force origin main"})
+print(decision.denied)      # True
+print(decision.policy_name)  # "no-force-push-main"
+print(decision.reason)       # "Force push to main/master is not allowed"
+```
+
+### Load from Python dict
+
+```python
+from action_policy import PolicyEngine
+
+policy_data = {
+    "policies": [
+        {
+            "name": "no-force-push",
+            "match": {"tool": "bash", "args_pattern": r"git\s+push\s+--force"},
+            "action": "deny",
+            "reason": "Force push requires human approval",
+            "priority": 10,
+        },
+        {
+            "name": "allow-git-status",
+            "match": {"tool": "bash", "args_pattern": r"git\s+status"},
+            "action": "approve",
+            "reason": "Status checks are safe",
+            "priority": 50,
+        },
+    ]
+}
+
+engine = PolicyEngine.from_dict(policy_data)
+```
+
+### Fail-closed mode
+
+```python
+from action_policy import PolicyEngine, Action
+
+engine = PolicyEngine.from_template("strict", default_action=Action.DENY)
+
+engine.evaluate("read_file", {"path": "README.md"})
+# -> Decision(action=APPROVE, policy_name="allow-read-only", ...)
+
+engine.evaluate("bash", {"command": "npm install"})
+# -> Decision(action=DENY, policy_name="default", reason="No matching policy — default deny (fail-closed)")
+```
+
+### Decorator guard
+
+```python
+from action_policy import PolicyEngine, PolicyDenied, PolicyEscalated
+
+engine = PolicyEngine.from_template("safe_coding")
+
+@engine.guard
+def execute_tool(tool: str, args=None):
+    print(f"Executing {tool} with {args}")
+
+try:
+    execute_tool("bash", args={"command": "rm -rf /tmp/data"})
+except PolicyEscalated as e:
+    print(f"Needs confirmation: {e.decision.reason}")
+    # -> "Needs confirmation: Recursive file deletion needs confirmation"
+```
+
+### Combining templates with custom rules
+
+```python
+from action_policy import PolicyEngine, PolicyRule, Action
+
+engine = PolicyEngine.from_template("safe_coding")
+
+# Add a custom rule
+engine.add_policy(PolicyRule(
+    name="no-pip-install",
+    action=Action.ESCALATE,
+    reason="Package installation needs confirmation",
+    tool_pattern="bash",
+    args_pattern=r"pip\s+install",
+    priority=15,
+))
+
+decision = engine.evaluate("bash", {"command": "pip install requests"})
+print(decision.escalated)  # True
+```
+
+### Path-based policies
+
+```python
+from action_policy import PolicyEngine
+
+policy_data = {
+    "policies": [
+        {
+            "name": "protect-config",
+            "match": {
+                "tool": "~(write|edit)",
+                "path_patterns": ["~config\\.ya?ml$", "~\\.env"],
+            },
+            "action": "escalate",
+            "reason": "Config file changes need review",
+            "priority": 10,
+        }
+    ]
+}
+
+engine = PolicyEngine.from_dict(policy_data)
+decision = engine.evaluate("write_file", {"file_path": "/app/config.yaml", "content": "..."})
+print(decision.escalated)  # True
+```
+
+## YAML Policy Format
+
+```yaml
+policies:
+  - name: "rule-name"          # required, unique identifier
+    match:
+      tool: "pattern"          # exact, glob, or ~regex (default: "*")
+      args_pattern: "regex"    # optional, regex against stringified args
+      path_patterns:           # optional, list of glob/~regex
+        - "/path/pattern/*"
+        - "~regex_pattern"
+    action: "approve|deny|escalate"  # required
+    reason: "explanation"      # optional, human-readable
+    priority: 100              # optional, lower = higher priority (default: 100)
+```
+
+## Links
+
+- Docs: https://github.com/QuartzUnit/agent-action-policy
+- PyPI: https://pypi.org/project/agent-action-policy/
+- Source: https://github.com/QuartzUnit/agent-action-policy

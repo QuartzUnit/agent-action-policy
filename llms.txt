@@ -1,0 +1,117 @@
+# agent-action-policy
+
+> Declarative action policies for AI agents -- approve, deny, or escalate any tool call before execution
+
+## Purpose
+
+Provides a declarative policy engine that evaluates agent tool calls against configurable rules before execution. Policies can be defined in YAML or Python dicts with support for glob and regex pattern matching. Ships with 4 built-in templates. Zero required dependencies (PyYAML optional for YAML loading).
+
+## Capabilities
+
+- **Policy evaluation**: Match tool calls by tool name, argument content, and file paths
+- **Three actions**: APPROVE, DENY, or ESCALATE any tool call
+- **Pattern matching**: Exact match, glob (`file_*`), and regex (`~(bash|shell)`) for tool names; regex for args; glob/regex for file paths
+- **Built-in templates**: `safe_coding`, `safe_browsing`, `safe_database`, `strict`
+- **Priority ordering**: Lower priority number wins when multiple policies match
+- **Decorator guard**: `@engine.guard` decorator raises `PolicyDenied` / `PolicyEscalated` on blocked calls
+- **Open or closed default**: Configurable default action (APPROVE or DENY) when no policy matches
+
+## Installation
+
+pip install agent-action-policy
+pip install agent-action-policy[yaml]  # for YAML file loading
+
+## Quick Use
+
+### Python
+```python
+from action_policy import PolicyEngine, Action
+
+engine = PolicyEngine.from_template("safe_coding")
+decision = engine.evaluate(tool="bash", args={"command": "rm -rf /"})
+print(decision.denied)   # True
+print(decision.reason)   # explanation from the policy rule
+```
+
+## API Reference
+
+### PolicyEngine
+- signature: `PolicyEngine(policies: list[PolicyRule] | None = None, default_action: Action = Action.APPROVE, default_reason: str = "")`
+- description: Core policy engine. Evaluates tool calls against a sorted list of PolicyRule instances. First matching policy wins. Default behavior when no policy matches is configurable (APPROVE or DENY).
+
+### PolicyEngine.from_yaml
+- signature: `from_yaml(cls, path: str | Path, **kwargs) -> PolicyEngine`
+- description: Class method. Load policies from a YAML file. Requires `pip install agent-action-policy[yaml]`.
+- returns: `PolicyEngine`
+
+### PolicyEngine.from_dict
+- signature: `from_dict(cls, data: dict[str, Any], **kwargs) -> PolicyEngine`
+- description: Class method. Load policies from a dict structure (e.g., already-parsed YAML).
+- returns: `PolicyEngine`
+
+### PolicyEngine.from_template
+- signature: `from_template(cls, template_name: str, **kwargs) -> PolicyEngine`
+- description: Class method. Load a built-in policy template. Available templates: `safe_coding`, `safe_browsing`, `safe_database`, `strict`.
+- returns: `PolicyEngine`
+
+### PolicyEngine.evaluate
+- signature: `evaluate(self, tool: str, args: dict[str, Any] | str | None = None) -> Decision`
+- description: Evaluate a tool call against all policies. First matching policy (by priority) wins. Returns the default action decision if no policy matches.
+- returns: `Decision`
+
+### PolicyEngine.guard
+- signature: `guard(self, func: Callable) -> Callable`
+- description: Decorator that checks policy before executing the wrapped function. Raises `PolicyDenied` on DENY or `PolicyEscalated` on ESCALATE.
+- returns: `Callable`
+
+### PolicyEngine.add_policy
+- signature: `add_policy(self, policy: PolicyRule) -> None`
+- description: Add a policy rule and re-sort by priority.
+- returns: `None`
+
+### PolicyRule
+- signature: `PolicyRule(name: str, action: Action, reason: str = "", tool_pattern: str = "*", args_pattern: str | None = None, path_patterns: tuple[str, ...] = (), priority: int = 100)`
+- description: Frozen dataclass defining a single policy rule. `tool_pattern` supports exact, glob, and `~regex`. `args_pattern` is a regex matched against stringified args. `path_patterns` are glob/regex patterns matched against file paths extracted from args.
+- method: `matches(tool: str, args: dict | str | None = None) -> bool`
+- method: `to_decision() -> Decision`
+
+### Action (Enum)
+- values: `APPROVE`, `DENY`, `ESCALATE`
+- description: Policy evaluation result action.
+
+### Decision
+- signature: `Decision(action: Action, policy_name: str = "", reason: str = "")`
+- description: Frozen dataclass. Result of a policy evaluation.
+- properties: `approved -> bool`, `denied -> bool`, `escalated -> bool`
+
+### PolicyDenied
+- signature: `PolicyDenied(decision: Decision)`
+- description: Exception raised when a policy denies an action. Contains the `decision` attribute.
+
+### PolicyEscalated
+- signature: `PolicyEscalated(decision: Decision)`
+- description: Exception raised when a policy requires human escalation. Contains the `decision` attribute.
+
+### policy_from_dict
+- signature: `policy_from_dict(data: dict[str, Any]) -> PolicyRule`
+- description: Create a PolicyRule from a dict (e.g., a single entry from parsed YAML).
+- returns: `PolicyRule`
+- import: `from action_policy.policy import policy_from_dict`
+
+### load_policies_from_yaml
+- signature: `load_policies_from_yaml(path: str | Path) -> list[PolicyRule]`
+- description: Load policies from a YAML file. Requires PyYAML.
+- returns: `list[PolicyRule]`
+- import: `from action_policy.loader import load_policies_from_yaml`
+
+### load_policies_from_dict
+- signature: `load_policies_from_dict(data: dict[str, Any]) -> list[PolicyRule]`
+- description: Load policies from a dict structure with a `policies` key containing a list of policy dicts.
+- returns: `list[PolicyRule]`
+- import: `from action_policy.loader import load_policies_from_dict`
+
+## Links
+
+- Docs: https://github.com/QuartzUnit/agent-action-policy
+- PyPI: https://pypi.org/project/agent-action-policy/
+- Source: https://github.com/QuartzUnit/agent-action-policy
