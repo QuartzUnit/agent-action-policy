@@ -9,7 +9,7 @@ description = "Declarative action policies for AI agents — approve, deny, or e
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
-authors = [{ name = "hmj", email = "hmj@quartzunit.com" }]
+authors = [{ name = "QuartzUnit" }]
 keywords = [
     "agent",
     "policy",
@@ -42,6 +42,8 @@ yaml = ["pyyaml>=6.0"]
 Homepage = "https://github.com/QuartzUnit/agent-action-policy"
 Repository = "https://github.com/QuartzUnit/agent-action-policy"
 Issues = "https://github.com/QuartzUnit/agent-action-policy/issues"
+Documentation = "https://github.com/QuartzUnit/agent-action-policy#readme"
+Changelog = "https://github.com/QuartzUnit/agent-action-policy/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/action_policy"]

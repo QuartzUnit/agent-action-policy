@@ -138,3 +138,8 @@ def execute_tool(tool: str, args: dict = None):
 ## License
 
 MIT
+
+
+---
+
+<sub>Part of the [QuartzUnit](https://github.com/QuartzUnit) ecosystem — composable Python libraries for data collection, extraction, search, and AI agent safety.</sub>
